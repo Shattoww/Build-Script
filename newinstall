@@ -1,0 +1,499 @@
+#!/usr/bin/env bash
+
+# # Coding conventions
+#
+# globals are `sample_var`.
+# locals are `_sample_var`.
+# exported values and arrays are `SAMPLE_VAR`.
+#
+# Lets not forget that positional parameters within functions are local variables and must be handled as such. Don't forget to quote!
+#
+# # Error handling
+#
+# Error handling? kekekeke. It's terrible.
+#
+# We aren't going to use set-e because
+# it's hard to control whether you want
+# an immediate exit. Exits will be controlled
+# with the die() function.
+#
+# `set -u` is on, which means undefined variables are errors.
+#
+# Always double quote your variables!!! You don't want unexpected expansion :)
+# Every command should be expected to return 0 on success, and
+# non-zero on failure. 
+#
+# Lets make sure any long lists are stored in arrays and not variables :x
+# It becomes a lot easier to iterate over an indexed array and do fun stuff with it when we store in arrays.
+
+# No need to source a library, just makes the script harder to debug and more confusing. Functions are included in beginning.
+
+#shopt -u sourcepath # Makes the library look in ./
+#source library # Calls the library with functions
+#set -u # undefined variables are errors
+
+enviro="$1" # This can be either prod, demo, staging, or dev.
+app="$2" # This can be either cardholder, internal, or manage.
+ENVIROCHECK=(prod demo staging dev) ## Array that checks for proper environent in argument $1
+APPCHECK=(cardholder internal manage) ## Array that checks for proper environment in argument $2
+EXTRAS=(global sdir includes media billpay) ## We'll iterate through both of these arrays later and do things based on your APP($2)
+WRITEABLES=(batchfiles downloads reports translations batchdelete cardstatus locationcode ddsfiles utildocuments utilstubs paystubs)
+host='hostname'
+
+#
+#
+# GCC Application Function Library
+#
+#
+
+# Command grouping for simple commands so options won't be repeated.
+# These need to stay functions, assigning them as variables can lead to strange expansions.
+
+CP() {
+    cp -ap "$1" "$2"
+}
+
+MKDIR() {
+    mkdir -p "$1"
+}
+
+LN() {
+    ln -s "$1" "$2"
+}
+
+DATE() {
+    date %y%m%d%H%M
+}
+
+PRINTF() {
+    printf "%s"
+}
+
+RM() {
+	rm -dv
+}
+
+## Some quick directory tree shortcuts that will be repeated
+
+trunk="/opt/gcc/gcc-svp"
+src="www/html"
+ext="www/extensions"
+assets="$trunk/assets"
+cfusion="/opt/coldfusion10/cfusion/wwwroot"
+perms="770"
+
+## Variables
+version="1.0"
+_host=`hostname`
+
+## Checks if the command exists - We may not need this as most everything so far is using bash builtins.
+
+exists() {
+  if command -v $1 >/dev/null 2>&1
+  then
+    return 0
+  else
+    return 1
+  fi
+}
+
+## Bug reporting
+
+report_bug() {
+  printf "%s\n" "Version: $version"
+  printf "%s\n" "Please e-mail bwoodard@globalcashcard.com for any anomalies observed."
+}
+
+## This expands to the most recent exit code of the last foreground command.
+
+die() {
+	echo ""
+    report_bug
+    local st=$?;   
+    printf >&2 '%s: %s\n' "$0" "$1";
+    exit "$st";
+}
+
+## Welcome Message for initial return
+
+print_welcome_message() {
+
+    cat <<EOF
+
+Welcome to GCC Application Installer.
+Your hostname is "$_host"
+Your chosen environment is "$enviro"
+The Application being installed is "$app"
+
+EOF
+
+    if [[ "$(id -u)" = 0 ]]; then
+      cat <<EOF
+
+This script appears to be running as root. This is expected and needed. 
+EOF
+    fi
+
+    if [[ "$(id -u)" -ne 0 ]]; then
+  cat <<EOF
+
+WARNING: This script is not running as root. Root is needed to perform many of the operations this script does.
+EOF
+    fi
+    echo
+}
+
+## This is the bulk function that does most of the hardwork needed for CF. Different things happen depending on the selected install application.
+
+copy() {
+    local _V0=$1
+    local _V1=$2
+    local _V2=$3
+#    local _VB=$BUILD_ID
+    local bool=false
+    if [[ -z "_V2" ]]; then
+        bool=true;
+    fi
+    if [[ "$bool" == false ]]; then
+        case "$_V1" in
+        users)
+            users="$trunk/cardholder/$_V0"
+            printf "%s" "|$_V0| Copying $src/$_V1 to $trunk/cardholder/$_V0/html"
+            for i in "$src/$_V1"; do
+                CP "$i" "$users"
+        done
+            printf "%s" "|$_V0| Copying $ext to $trunk/cardholder/$_V0"
+            for i in "$ext"; do
+                CP "$i" "$users"
+        done
+        ;;
+        utils)
+            printf "%s" "|$_V0| Copying $trunk/$_V1 to $trunk/util1/$_V0/html"
+            for i in "$trunk/$_V1"; do
+                CP "$i" "$trunk/util1/$_V0/html"
+        done
+            printf "%s" "|$_V0| Copying $ext to $trunk/util1/$_V0"
+            for i in "$ext"; do
+                CP "$i" "$trunk/util1/$_V0"
+        done
+        ;;
+        api-prod)
+            printf "%s" "|$_V0| Copying $src/api/prod to $trunk/$_V1/$_V0/html"
+            for i in "$src/api/prod"; do
+                CP "$i" "$trunk/$_V1/$_V0/html"
+        done
+            printf "%s" "|$_V0| Copying $ext to $trunk/$_V1/$_V0/"
+            for i in "$ext"; do
+                CP "$i" "$trunk/$_V1/$_V0/"
+        done
+            printf "%s" "|$_V0| We're creating a symlink from api/dev to api/api4"
+            for i in "$trunk/$_V1/$_V0/html/oldapi/global/api/api4"; do
+                LN "$i" "$trunk/$_V1/$_V0/html/oldapi/global/api/dev"
+        done
+        ;;
+        *)
+            printf "%s" "|$_V1| Copying $src/$_V0 to $trunk/$_V0/$_V1/html"
+            for i in "$src/$_V1"; do
+                CP "$i" "$trunk/$_V0/$_V1/html"
+        done
+            printf "%s" "|$_V1| Copying $ext to $trunk/$_V0/$_V1/"
+            for i in "$ext"; do
+                CP "$i" "$ext" "$trunk/$_V2/$_V1/"
+        done
+        	;;
+    	esac
+    else
+    	if [[ "$bool" == true ]]; then
+        	case "$_V2" in
+        	users)
+            	printf "%s" "|$_V0| Copying $src/$_V1 to $trunk/cardholder/$_V0/html/$_V1"
+            	for i in "$src/$_V1"; do
+                	CP "$i" "$trunk/cardholder/$_V0/html/$_V1"
+        	done
+        	;;
+        	utils)
+            	printf "%s" "|$_V0| Copying $src/$_V1 to $trunk/util1/$_V0/html/$_V1"
+                for i in "$src/$_V1"; do
+            	    CP "$i" "$trunk/util1/$_V0/html/$_V1"
+            done
+        	;;
+        	*)
+            	printf "%s" "|$_V0| Copying $src/$_V1 to $trunk/$_V2/$_V0/html/$_V1"
+                for i in "$src/$_V1"; do
+            	    CP "$i" "$trunk/$_V2/$_V0/html/$_V1"
+            done
+        	;;
+    	esac
+    	fi
+	fi
+}
+
+
+## This function creates the trunk dir 
+
+createdirectory() {
+    local _V1=$2
+    local _V2=$3
+    local _V0=$1
+    printf "%s" "We're making some directories, hazzah!"
+    # Here we backup the current trunk to a backup
+    mv "$trunk/$_V0/$_V1" "$trunk/$_V0/$_V1.$DATE"
+    MKDIR "$trunk/$_V0/$_V1"
+}
+
+## Here we're going to make sure the permissions are correct. This function may not be needed as we should be maintaing permissions with cp flags.
+
+#setperm() {
+#        printf "%s" "Changing ownership of $_V0 to apache.nobody"
+#        chown -R apache.nobody "$_V0"
+#        printf "%s" "Changing permissions of $_V0 to $perms"
+#        CHMOD "$perms" "$_V0"
+#}
+
+## We're making a quick symbolic link loop here to make sure everything is properly LN'd.
+
+lnloop() {
+	local _V0=$1
+	local _V1=$2
+	for d in "$cfusion"; do
+		LN "$trunk/$d" "$trunk/$_V1/$_V0/html/$d"
+done
+}
+
+## This is going to be a gigantic symlink function that does certain stuff depending on the $app
+
+symlink() {
+	local _V0=$1
+	local _V1=$2
+	local _V2=$3
+	case "$_V1" in
+		reports)
+			PRINTF "Deleting $trunk/$_V2/$_V0/html/$_V1"
+			RM "$trunk/$_V2/$_V0/html/$_V1" || die
+			PRINTF "Creating $trunk/$_V2/$_V0/html/$_V1 and linking to $assets/$_V1"
+			LN "$assets/$_V1 $trunk/$_V2/$_V0/html/media/documents/$_V1"
+		;;
+		temp)
+			PRINTF "Deleting $trunk/$_V2/$_V0/html/$_V1"
+			RM "$trunk/$_V2/$_V0/html/$_V1" || die
+			PRINTF "Creating $trunk/$_V2/$_V0/html/media/documents/$_V1 and linking to $assets/$_V1"
+			LN "$assets/$_V1" "$trunk/$_V2/$_V0/html/media/documents/$_V1"
+		;;
+		downloads|translations|batchdelete|cardstatus|locationcode|ddsfiles)
+			PRINTF "Deleting $trunk/$_V2/$_V0/html/media/documents/$_V1"
+			RM "$trunk/$_V2/$_V0/html/media/documents/$_V1" || die
+			PRINTF "Creating $trunk/$_V2/$_V0/html/media/documents/$_V1 and linking to $assets/$_V1"
+			LN "$assets/$_V1" "$trunk/$_V2/$_V0/html/media/documents/$_V1"
+		;;
+		utilstubs)
+			PRINTF "Deleting $trunk/$_V2/$_V0/html/stubs"
+			RM "$trunk/$_V2/$_V0/html/stubs" || die
+			PRINTF "Creating $trunk/$_V2/$_V0/html/stubs and linking it to $assets/$_V1"
+			LN "$assets/$_V1" "$trunk/$_V2/$_V0/html/documents"
+		;;
+		utildocuments)
+			PRINTF "Deleting $trunk/$_V2/$_V0/html/documents/"
+			RM "$trunk/$_V2/$_V0/html/documents" || die
+			PRINTF "Creating $trunk/$_V2/$_V0/html/documents and linking it to $assets/$_V1"
+			LN "$assets/$_V1" "$trunk/$_V2/$_V0/html/documents"
+		;;
+		*)
+			PRINTF "$_V1 did not match any of our case statements."
+		;;
+	esac
+}
+
+## We're going to start the actual script here. Function library is above this line.
+
+print_welcome_message ## Here we call the initial welcome function
+
+# This block checks to make sure we can reference Jenkins imported variables. Sanity check #1
+if [[ -z "BUILD_ID"  ]]; then
+	printf "%s" "FAILURE: Cannot determine Jenkins BUILD_ID which isn't good"
+	die
+fi
+
+# We're goin to check to make sure we're running on a supported OS. Sanity Check #2
+
+if [[ -f /etc/redhat-release ]]; then
+    rhel=$(cat /etc/redhat-release)
+ 		printf "%s" "Congratulations, you are "$rhel""
+        echo ""
+ 	else
+ 		printf "%s" "Uh-oh, it doesn't appear you are on CentOS/RHEL. This script hasn't been tested on other OS"
+        echo ""
+ 		die
+fi
+
+# Here we're goint to test and make sure that our environments and apps are sound. Sanity Check #3
+
+
+if [[ "${ENVIROCHECK[*]}" =~ "$enviro" ]]; then
+		printf "%s" "You've passed the environment check, moving to next step"
+		echo ""
+	else
+		printf "%s" "Uh-oh, it would appear you aren't in a suitable environment, better check yourself."
+		die
+fi
+
+if [[ "${APPCHECK[@]}" =~ "$app" ]]; then
+		printf "%s" "You've passed the application check, moving to next step"
+		echo ""
+	else
+		printf "%s" "What application is this? What have you done to me??? ARGHGLLHAHGA"
+		die
+fi
+		
+# This is our main install for loop, certain things happen in prod, qa, and dev.
+
+for x in "$app"; do
+	case "$enviro" in
+			prod)
+				case "$x" in
+					cardholder*)
+						copy "$enviro" "users"
+						;;
+					manage*)
+						copy "$enviro" "$x"
+						copy "$enviro" "users" "$x"
+						;;
+					internal*)
+						copy "$enviro" "$x"
+						copy "$enviro" "admin" "$x"
+						copy "$enviro" "manage" "$x"
+						copy "$enviro" "users" "$x"
+						;;
+					*)
+						copy "$enviro" "$x"
+						;;
+					esac
+
+		for e in "${EXTRAS[@]}"; do
+			case "$e" in
+				billpay)
+				if [[ "$app" = cardholder || "$app" = internal ]]; then
+					copy "$enviro" "$e" "$x"
+				else
+					printf "%s" "$x is not needed for $i on $host"
+				fi
+					;;
+				*)
+					copy "$enviro" "$e" "$x"
+					;;
+				esac
+		done
+
+	lnloop "$enviro" "$x"
+
+		case "$x" in
+			manage*)
+				if [[ "$_V1" == "cardholder" ]]; then
+					printf "%s" "Creating a symbolic link for $trunk/$_V1/$_V0/html/users pointing to $trunk/$_V1/$_V0/html/"
+					for i in "$trunk/$_V1/$_V0/html/."; do
+						LN "$i" "$trunk/$_V1/$_V0/html/users"
+					done
+					printf "%s" "Creating a symbolik link for $trunk/$x/$enviro/$html/. pointing to /var/www/html/admin"
+				fi
+					for i in "$trunk/$x/$enviro/$html/."; do
+						LN "$i" /var/www/html/admin
+					done
+				;;
+			*)
+					PRINTF "Creating a symbolic link \for $trunk/$_V1/$_V0/html/users pointing to $trunk/$_V1/$_V0/html/"
+					for i in "$trunk/$_V1/$_V0/html/."; do
+						LN "$i" "$trunk/$_V1/$_V0/html/users"
+					done
+				;;
+		esac
+
+		for w in "${WRITEABLES[@]}"; do
+			MKDIR "$trunk/assets/$w"
+			chmod 777 "$trunk/assets/$w"
+
+			case "w" in
+				paystubs)
+					if [[ "$app" = "manage" ]]; then
+						rmdir "$trunk/assets/$w"
+						for z in /mnt/openfiler/paystubs; do
+							LN "$z" "$trunk/assets/$w"
+						done
+						elif [[ "$app" = "cardholder" ]]; then
+							MKDIR "$assets/$w/stubs"
+							chmod 770 "assets/$w/stubs"
+					fi
+					;;
+				reports)
+					case "$app" in
+						internal|manage)
+							symlink "$enviro" "$w" "$app"
+						;;
+						*)
+						printf "%s" "$w is not required for $app on $hostname"
+						;;
+					*)
+						printf "%s" "$w is not needed for $app on $hostname"
+					;;
+					esac
+				;;
+			esac
+		done
+        for y in "$trunk/assets/translations" "$trunk/assets/reports"; do
+            [[ -e "$y" ]] || continue
+		    chmod 770 "$y"	
+		done
+		# Here we're removing the default /var/www/html dir and creating a symlink to the /opt/cf structure
+		rmdir /var/www/html
+		LN "$trunk/$app/$enviro/html" "/var/www/html"
+		LN "$trunk/$app/$enviro/$extensions" "/var/www/extensions"
+		if [[ -d "/opt/coldfusion10" ]]
+			then
+				LN "/opt/coldfusion10/cfusion/wwwroot/CFIDE/scripts" "$trunk/$app/$enviro/html/includes/intscripts"
+		fi
+	;;
+	# Here we're going to going to move into installing the demo/staging/dev boxes. Prod is above this line.
+	demo|staging|dev)
+		PRINTF "Starting install for $app on $enviro on $hostname"
+		if [[ "$i" == demo ]]; then
+			break
+		else
+			createdirectory "$enviro" "$app" "$hostname"
+		fi
+		case "$app" in
+			cardholder*)
+				copy "$enviro" "users"
+			;;
+			manage*)
+				copy "$enviro" "$app"
+				copy "$enviro" "users" "$app"
+			;;
+			internal*)
+				copy "$enviro" "$app"
+				copy "$enviro" "admin" "$app"
+				copy "$enviro" "manage" "$app"
+				copy "$enviro" "users" "$app"
+			;;
+			*)
+				copy "$enviro" "$app"
+			;;
+		esac
+		for e in "${EXTRAS[@]}"; do
+			case "$e" in
+				billpay)
+					case "$app" in
+						cardholder*|internal*)
+							copy "$enviro" "$e" "$app"
+						;;
+						*)
+							PRINTF "$e is not needed for $app"
+						;;
+					esac
+				;;
+			esac
+		done
+		;;
+		*)
+			PRINTF "Nothing matched the case statement - error"
+            die
+		;;
+	esac
+done
